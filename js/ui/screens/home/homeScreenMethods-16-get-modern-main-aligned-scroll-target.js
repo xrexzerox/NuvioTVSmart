@@ -252,11 +252,13 @@ export function createHomeScreenMethods16() {
           currentMain.classList.remove("focused");
         }
         this.setFocusedNode(target, { suppressDelegatedFocus: true });
-        logHomePerf("syncMainFocusToViewport", {
-          ms: Number((homePerfNow() - syncStart).toFixed(2)),
-          rowKey: String(this.getNodeRowKey(target) || ""),
-          itemIndex: Number(target.dataset?.navCol || 0)
-        });
+        if (HOME_PERF_DEBUG) {
+          logHomePerf("syncMainFocusToViewport", {
+            ms: Number((homePerfNow() - syncStart).toFixed(2)),
+            rowKey: String(this.getNodeRowKey(target) || ""),
+            itemIndex: Number(target.dataset?.navCol || 0)
+          });
+        }
       }
       this.lastMainFocus = target;
       this.rememberMainRowFocus(target);

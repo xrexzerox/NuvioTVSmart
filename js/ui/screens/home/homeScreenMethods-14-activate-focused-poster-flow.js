@@ -139,10 +139,10 @@ export function createHomeScreenMethods14() {
       const root = this.homeTruncationScope || this.container;
       this.homeTruncationScope = null;
       this.applyModernHeroDescriptionBounds(root);
-      // Modern Home hides .home-poster-copy; classic/grid still render those
-      // labels and therefore keep the measured truncation path.
-      const truncationSelector =
-        this.layoutMode === "modern" ? ".home-hero-description" : ".home-hero-description, .home-poster-title, .home-poster-subtitle";
+      // Poster labels use native CSS ellipsis. Keep measured text fitting only
+      // for the hero description instead of forcing repeated reflows for every
+      // poster title on a classic/grid Home render.
+      const truncationSelector = ".home-hero-description";
       const nodes = root.querySelectorAll(truncationSelector);
       nodes.forEach((node) => {
         if (!(node instanceof HTMLElement)) {

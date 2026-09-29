@@ -323,19 +323,29 @@ export function createCatalogSeeAllScreenMethods02() {
         return;
       }
       shell.__catalogSeeAllShellBound = true;
+      let scrollFrame = 0;
       shell.addEventListener(
         "scroll",
         () => {
-          this.savedScrollTop = Number(shell.scrollTop || 0);
-          if (this.shouldAutoLoadMoreFromScroll(shell)) {
-            if (this.maybeExpandRenderedItems(this.renderedItemsLimit - 1)) {
-              this.render();
+          if (scrollFrame) {
+            return;
+          }
+          scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            if (!shell.isConnected || Router.getCurrent() !== "catalogSeeAll") {
+              return;
             }
-          }
-          const currentShell = this.container?.querySelector(".seeall-shell") || null;
-          if (this.shouldAutoLoadMoreFromScroll(currentShell)) {
-            this.loadNextPage({ preserveViewport: true });
-          }
+            this.savedScrollTop = Number(shell.scrollTop || 0);
+            if (this.shouldAutoLoadMoreFromScroll(shell)) {
+              if (this.maybeExpandRenderedItems(this.renderedItemsLimit - 1)) {
+                this.render();
+              }
+            }
+            const currentShell = this.container?.querySelector(".seeall-shell") || null;
+            if (this.shouldAutoLoadMoreFromScroll(currentShell)) {
+              this.loadNextPage({ preserveViewport: true });
+            }
+          });
         },
         { passive: true }
       );

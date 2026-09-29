@@ -100,6 +100,8 @@ import { renderLoadingIndicator } from "../../components/loadingIndicator.js";
 
 import { DirectDebridResolver } from "../../../core/debrid/directDebridResolver.js";
 
+import { DebridSettingsStore } from "../../../data/local/debridSettingsStore.js";
+
 import { DebridStreamPresentation } from "../../../core/debrid/directDebridStreamPresentation.js";
 
 import { TrackingScrobbleService } from "../../../data/repository/trackingScrobbleService.js";
@@ -226,6 +228,8 @@ export function flattenStreamGroups(streamResult) {
     return [];
   }
   const flattened = [];
+  let debridSettings = null;
+  let hasDebridSettings = false;
   (streamResult.data || []).forEach((group) => {
     const addonName = group.addonName || "Addon";
     (group.streams || []).forEach((stream, index) => {
@@ -286,11 +290,18 @@ export function flattenStreamGroups(streamResult) {
           : Number(group.addonOrderIndex ?? Number.MAX_SAFE_INTEGER),
         raw: stream
       };
-      if (
-        DirectDebridResolver.shouldListStream(entry) ||
-        WebOsEngineFsResolver.canResolveStream(entry) ||
-        TizenStreamingServerResolver.canResolveStream(entry)
-      ) {
+      const hasPlayableUrl = [entry.url, entry.externalUrl].some(
+        (value) => value && !String(value).trim().toLowerCase().startsWith("magnet:")
+      );
+      let shouldListStream = hasPlayableUrl || Boolean(entry.ytId);
+      if (!shouldListStream) {
+        if (!hasDebridSettings) {
+          debridSettings = DebridSettingsStore.get();
+          hasDebridSettings = true;
+        }
+        shouldListStream = DirectDebridResolver.shouldListStream(entry, { settings: debridSettings });
+      }
+      if (shouldListStream || WebOsEngineFsResolver.canResolveStream(entry) || TizenStreamingServerResolver.canResolveStream(entry)) {
         flattened.push(entry);
       }
     });

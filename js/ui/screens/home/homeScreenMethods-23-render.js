@@ -39,17 +39,11 @@ export function createHomeScreenMethods23() {
     render() {
       const renderStart = HOME_PERF_DEBUG ? homePerfNow() : 0;
       this.cancelScheduledRender();
-      this.cancelModernCameraFollow({ stopAnimations: true });
-      this.teardownModernTrackScrollPagination();
-      this.teardownContinueWatchingProgressiveRendering();
-      this.invalidateNavigationModel();
       const backFocusState = this.isRestoringFocusFromBack ? this.pendingBackFocusState || this.readStoredReturnFocusState() || null : null;
       const liveFocusState = this.captureCurrentFocusState();
       const savedFocusState = this.savedFocusStates?.[this.layoutMode] || null;
       const rawRetainedFocusState = backFocusState || liveFocusState || savedFocusState || null;
       const retainedFocusState = rawRetainedFocusState;
-      this.cancelFocusedPosterFlow();
-      this.expandedPosterNode = null;
       const backFocusHero = backFocusState ? this.getHeroSourceFromFocusState(backFocusState) : null;
       const shouldHoldHeroForContinueWatching =
         this.layoutMode === "modern" &&
@@ -152,7 +146,6 @@ export function createHomeScreenMethods23() {
         this.layoutMode === "grid" && !this.isPerformanceConstrained() && !this.isLegacyTvRuntime()
           ? HOME_GRID_SAFE_MAX_COLUMNS * homeGridRowCount
           : rowItemLimit;
-      this.teardownGridStickyHeader();
 
       let mainContentMarkup = "";
       let modernLayoutPayload = null;
@@ -283,11 +276,48 @@ export function createHomeScreenMethods23() {
       // collide, which could otherwise preserve stale DOM.
       const shellMounted = Boolean(this.container.querySelector(".home-shell"));
       const markupUnchanged = shellMounted && this.renderedMarkup === nextMarkup;
+      // Identical markup can still have a focus side effect pending (for
+      // example returning from a detail page or closing a hold menu). Preserve
+      // the live DOM only when the normal focus-restoration pass is unnecessary.
+      const hasPendingFocusWork =
+        Boolean(this.pendingPosterHoldFocus) ||
+        Number.isFinite(this.pendingContinueWatchingFocusIndex) ||
+        Boolean(this.forceInitialContinueWatchingFocus) ||
+        Boolean(this.isRestoringFocusFromBack);
 
-      if (!markupUnchanged) {
-        this.container.innerHTML = nextMarkup;
-        this.renderedMarkup = nextMarkup;
+      if (markupUnchanged && !hasPendingFocusWork) {
+        // Keep the live focus node, scroll listeners, pagination state, active
+        // poster preview and in-flight camera follow intact on a no-op refresh.
+        // Rebuilding those after a background sync used to cause work even when
+        // the exact same DOM was already on screen.
+        this.homeRouteEnterPending = false;
+        this.renderedLayoutMode = this.layoutMode;
+        if (HOME_PERF_DEBUG) {
+          const mountedRows = Number(this.navModel?.rows?.length || 0);
+          const mountedCards = Number((this.navModel?.rows || []).reduce((total, rowNodes) => total + rowNodes.length, 0));
+          logHomePerf("render", {
+            ms: Number((homePerfNow() - renderStart).toFixed(2)),
+            domWrite: false,
+            layoutMode: this.layoutMode,
+            rows: Number(this.rows?.length || 0),
+            mountedRows,
+            mountedCards,
+            continueWatching: Number(this.continueWatchingDisplay?.length || 0),
+            focusables: Number(mountedCards + (this.navModel?.sidebar?.length || 0))
+          });
+        }
+        return;
       }
+
+      this.cancelModernCameraFollow({ stopAnimations: true });
+      this.teardownModernTrackScrollPagination();
+      this.teardownContinueWatchingProgressiveRendering();
+      this.teardownGridStickyHeader();
+      this.invalidateNavigationModel();
+      this.cancelFocusedPosterFlow();
+      this.expandedPosterNode = null;
+      this.container.innerHTML = nextMarkup;
+      this.renderedMarkup = nextMarkup;
 
       if (this.layoutMode === "grid") {
         normalizeHomeGridCatalogSections(this.container, {
@@ -422,6 +452,8 @@ export function createHomeScreenMethods23() {
       }
       if (this.layoutMode === "grid") {
         this.setupGridStickyHeader(showHeroSection);
+      } else {
+        this.teardownGridStickyHeader();
       }
       this.startHeroRotation();
       if (this.layoutMode === "modern" && heroItem && shouldEnrichModernHero(heroItem)) {
@@ -431,20 +463,25 @@ export function createHomeScreenMethods23() {
       this.renderedLayoutMode = this.layoutMode;
       this.ensureHomeTruncationObservers();
       this.scheduleHomeTruncationUpdate();
+      // A background state refresh often produces identical markup. Keep the
+      // existing lazy-image index in that case instead of rescanning the whole
+      // Home tree after every no-op render.
       this.scheduleHomeLazyImageHydration(null, { refreshIndex: true });
       this.scheduleReturnFocusRestore();
-      const mountedRows = Number(this.navModel?.rows?.length || 0);
-      const mountedCards = Number((this.navModel?.rows || []).reduce((total, rowNodes) => total + rowNodes.length, 0));
-      logHomePerf("render", {
-        ms: Number((homePerfNow() - renderStart).toFixed(2)),
-        domWrite: !markupUnchanged,
-        layoutMode: this.layoutMode,
-        rows: Number(this.rows?.length || 0),
-        mountedRows,
-        mountedCards,
-        continueWatching: Number(this.continueWatchingDisplay?.length || 0),
-        focusables: Number(mountedCards + (this.navModel?.sidebar?.length || 0))
-      });
+      if (HOME_PERF_DEBUG) {
+        const mountedRows = Number(this.navModel?.rows?.length || 0);
+        const mountedCards = Number((this.navModel?.rows || []).reduce((total, rowNodes) => total + rowNodes.length, 0));
+        logHomePerf("render", {
+          ms: Number((homePerfNow() - renderStart).toFixed(2)),
+          domWrite: true,
+          layoutMode: this.layoutMode,
+          rows: Number(this.rows?.length || 0),
+          mountedRows,
+          mountedCards,
+          continueWatching: Number(this.continueWatchingDisplay?.length || 0),
+          focusables: Number(mountedCards + (this.navModel?.sidebar?.length || 0))
+        });
+      }
     }
   };
 }

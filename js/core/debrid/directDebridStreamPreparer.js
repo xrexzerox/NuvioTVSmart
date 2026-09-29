@@ -85,24 +85,39 @@ export function prioritizeDirectDebridCandidates(
     season = null,
     episode = null,
     playerSettings = {},
+    debridSettings = null,
     installedAddonNames = new Set()
   } = {}
 ) {
   const normalizedLimit = Math.max(0, Math.trunc(Number(limit || 0)));
   if (!normalizedLimit) return [];
   const seen = new Set();
-  const candidates = (Array.isArray(streams) ? streams : [])
-    .filter((stream) => !playableStreamUrl(stream))
-    .filter((stream) => DirectDebridResolver.canResolveStream(stream, { season, episode }))
-    .filter((stream) => {
-      const key = directDebridPreparationKey(stream);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  const candidates = [];
+  for (const stream of Array.isArray(streams) ? streams : []) {
+    if (
+      playableStreamUrl(stream) ||
+      !DirectDebridResolver.canResolveStream(stream, { season, episode, settings: debridSettings })
+    ) {
+      continue;
+    }
+    const key = directDebridPreparationKey(stream);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    candidates.push({ stream, key });
+  }
   if (!candidates.length) return [];
 
   const prioritized = [];
+  const prioritizedKeys = new Set();
+  const addCandidate = (candidate) => {
+    if (!candidate || prioritized.length >= normalizedLimit || prioritizedKeys.has(candidate.key)) {
+      return;
+    }
+    prioritized.push(candidate);
+    prioritizedKeys.add(candidate.key);
+  };
   const selected = selectAutoPlayStream(streams, {
     mode: playerSettings.streamAutoPlayMode,
     source: playerSettings.streamAutoPlaySource,
@@ -112,14 +127,12 @@ export function prioritizeDirectDebridCandidates(
     selectedPlugins: playerSettings.streamAutoPlaySelectedPlugins
   });
   const selectedKey = selected ? directDebridPreparationKey(selected) : "";
-  const selectedCandidate = candidates.find(
-    (candidate) => selectedKey && directDebridPreparationKey(candidate) === selectedKey
-  );
-  if (selectedCandidate) prioritized.push(selectedCandidate);
+  addCandidate(candidates.find((candidate) => selectedKey && candidate.key === selectedKey));
 
   if (
+    prioritized.length < normalizedLimit &&
     String(playerSettings.streamAutoPlayMode || "").toUpperCase() ===
-    STREAM_AUTO_PLAY_MODE.REGEX_MATCH
+      STREAM_AUTO_PLAY_MODE.REGEX_MATCH
   ) {
     let regex = null;
     try {
@@ -128,29 +141,26 @@ export function prioritizeDirectDebridCandidates(
       regex = null;
     }
     if (regex) {
-      candidates.forEach((candidate) => {
-        if (
-          !prioritized.some(
-            (entry) => directDebridPreparationKey(entry) === directDebridPreparationKey(candidate)
-          ) &&
-          regex.test(searchableText(candidate))
-        ) {
-          prioritized.push(candidate);
+      for (const candidate of candidates) {
+        if (prioritized.length >= normalizedLimit) {
+          break;
         }
-      });
+        if (!prioritizedKeys.has(candidate.key) && regex.test(searchableText(candidate.stream))) {
+          addCandidate(candidate);
+        }
+      }
     }
   }
 
-  candidates.forEach((candidate) => {
-    if (
-      !prioritized.some(
-        (entry) => directDebridPreparationKey(entry) === directDebridPreparationKey(candidate)
-      )
-    ) {
-      prioritized.push(candidate);
+  if (prioritized.length < normalizedLimit) {
+    for (const candidate of candidates) {
+      if (prioritized.length >= normalizedLimit) {
+        break;
+      }
+      addCandidate(candidate);
     }
-  });
-  return prioritized.slice(0, normalizedLimit);
+  }
+  return prioritized.map((candidate) => candidate.stream);
 }
 
 export const DirectDebridStreamPreparer = {
@@ -177,11 +187,16 @@ export const DirectDebridStreamPreparer = {
       season,
       episode,
       playerSettings,
+      debridSettings: settings,
       installedAddonNames
     });
 
     for (const stream of candidates) {
-      const cached = DirectDebridResolver.cachedPlayableStream(stream, { season, episode });
+      const cached = DirectDebridResolver.cachedPlayableStream(stream, {
+        season,
+        episode,
+        settings
+      });
       if (cached) {
         if (typeof onPrepared === "function") onPrepared(stream, cached);
         continue;

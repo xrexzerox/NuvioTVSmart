@@ -5,6 +5,7 @@ export function createPlayerScreenMethods09() {
   const {
     PlayerSettingsStore,
     DirectDebridResolver,
+    DebridSettingsStore,
     WebOsEngineFsResolver,
     TizenStreamingServerResolver,
     findFollowingPostCreditsScene,
@@ -163,6 +164,8 @@ export function createPlayerScreenMethods09() {
       return true;
     },
     normalizeStreamCandidates(streams = []) {
+      let debridSettings = null;
+      let hasDebridSettings = false;
       return (streams || [])
         .map((stream, index) => {
           const streamUrl = stream?.url || stream?.externalUrl || "";
@@ -233,9 +236,18 @@ export function createPlayerScreenMethods09() {
             subtitles: Array.isArray(stream.subtitles) ? stream.subtitles : [],
             raw: stream
           };
-          return DirectDebridResolver.shouldListStream(entry) ||
-            WebOsEngineFsResolver.canResolveStream(entry) ||
-            TizenStreamingServerResolver.canResolveStream(entry)
+          const hasPlayableUrl = [entry.url, entry.externalUrl].some(
+            (value) => value && !String(value).trim().toLowerCase().startsWith("magnet:")
+          );
+          let shouldListStream = hasPlayableUrl || Boolean(entry.ytId);
+          if (!shouldListStream) {
+            if (!hasDebridSettings) {
+              debridSettings = DebridSettingsStore.get();
+              hasDebridSettings = true;
+            }
+            shouldListStream = DirectDebridResolver.shouldListStream(entry, { settings: debridSettings });
+          }
+          return shouldListStream || WebOsEngineFsResolver.canResolveStream(entry) || TizenStreamingServerResolver.canResolveStream(entry)
             ? entry
             : null;
         })

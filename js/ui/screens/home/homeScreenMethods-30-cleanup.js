@@ -79,6 +79,9 @@ export function createHomeScreenMethods30() {
         this.homeLazyImageCommitRaf = 0;
       }
       this.homeLazyImageCommitQueue = [];
+      this.homeLazyImageCommitByImage?.clear?.();
+      this.homeLazyImageCommitByImage = null;
+      this.homeLazyImageCommitHead = 0;
       this.homeLazyImageCommitOrder = 0;
       this.pendingHomeLazyImageAnchor = null;
       this.pendingHomeLazyImageFocusedRowOnly = false;

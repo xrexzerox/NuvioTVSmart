@@ -554,11 +554,11 @@ async function bootstrapApp() {
 
   ThemeManager.apply();
   I18n.apply();
-  // Tizen fast path: Chromium 56 has no requestIdleCallback, so the warmup
-  // timer fires mid Home-catalog paint and parses ~1-2MB of HLS+DASH on the
-  // sole main thread. Constrained runtimes load libs lazily on first
-  // playback intent instead (see loadStreamingLibs callers).
-  if (!getTvRuntimePerformanceProfile().isPerformanceConstrained) {
+  // Do not parse the HLS+DASH bundles during TV Home startup. Even newer TV
+  // WebViews can be single-threaded under load, and the optional warmup can
+  // contend with first-page catalog rendering. Playback engines load the
+  // required library on demand when playback is requested.
+  if (!getTvRuntimePerformanceProfile().isTvRuntime) {
     warmStreamingLibs({ delayMs: 1400 });
   }
   void checkForAppUpdateOnStartup();

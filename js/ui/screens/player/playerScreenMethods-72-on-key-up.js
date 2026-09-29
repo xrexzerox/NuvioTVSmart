@@ -9,6 +9,7 @@ export function createPlayerScreenMethods72() {
     Environment,
     Router,
     DirectDebridResolver,
+    DebridSettingsStore,
     TrackingScrobbleService,
     WebOsEngineFsResolver,
     TizenStreamingServerResolver,
@@ -69,17 +70,24 @@ export function createPlayerScreenMethods72() {
         season: this.params?.season == null ? null : Number(this.params.season),
         episode: this.params?.episode == null ? null : Number(this.params.episode)
       };
+      let debridSettings = null;
+      let hasDebridSettings = false;
 
       const scored = streams
-        .filter((stream) =>
-          Boolean(
-            stream?.url ||
-            stream?.externalUrl ||
-            DirectDebridResolver.canResolveStream(stream, resolveContext) ||
+        .filter((stream) => {
+          if (stream?.url || stream?.externalUrl) {
+            return true;
+          }
+          if (!hasDebridSettings) {
+            debridSettings = DebridSettingsStore.get();
+            hasDebridSettings = true;
+          }
+          return Boolean(
+            DirectDebridResolver.canResolveStream(stream, { ...resolveContext, settings: debridSettings }) ||
             WebOsEngineFsResolver.canResolveStream(stream) ||
             TizenStreamingServerResolver.canResolveStream(stream)
-          )
-        )
+          );
+        })
         .map((stream) => {
           const presentation = stream.streamPresentation || stream.raw?.streamPresentation || {};
           const text = [
