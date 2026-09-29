@@ -70,6 +70,8 @@ import { skipIntroRepository } from "../../../data/repository/skipIntroRepositor
 
 import { PlayerSettingsStore } from "../../../data/local/playerSettingsStore.js";
 
+import { DebridSettingsStore } from "../../../data/local/debridSettingsStore.js";
+
 import { DeviceLocalPlayerPreferences } from "../../../data/local/deviceLocalPlayerPreferences.js";
 
 import { StreamBadgeSettingsStore } from "../../../data/local/streamBadgeSettingsStore.js";
@@ -386,6 +388,7 @@ export {
   parentalGuideRepository,
   skipIntroRepository,
   PlayerSettingsStore,
+  DebridSettingsStore,
   DeviceLocalPlayerPreferences,
   StreamBadgeSettingsStore,
   TorrentSettingsStore,

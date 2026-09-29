@@ -386,8 +386,16 @@ function withResolvedUrl(stream = {}, result) {
 }
 
 export const DirectDebridResolver = {
-  canResolveStream(stream = {}, { season = null, episode = null } = {}) {
-    const settings = DebridSettingsStore.get();
+  canResolveStream(
+    stream = {},
+    { season = null, episode = null, settings: providedSettings = null } = {}
+  ) {
+    // Callers evaluating a page of streams can reuse one normalized settings
+    // snapshot instead of reparsing the profile-scoped store for every item.
+    const settings =
+      providedSettings && typeof providedSettings === "object"
+        ? providedSettings
+        : DebridSettingsStore.get();
     if (!settings.enabled) {
       return false;
     }
@@ -415,12 +423,14 @@ export const DirectDebridResolver = {
     return Boolean(DebridProviders.apiKeyFor(settings, provider.id));
   },
 
-  shouldListStream(stream = {}) {
-    return Boolean(getStreamUrl(stream) || stream.ytId || this.canResolveStream(stream));
+  shouldListStream(stream = {}, options = {}) {
+    return Boolean(getStreamUrl(stream) || stream.ytId || this.canResolveStream(stream, options));
   },
 
-  cachedPlayableStream(stream = {}, { season = null, episode = null } = {}) {
-    const key = cacheKeyFor(stream, season, episode);
+  cachedPlayableStream(stream = {}, { season = null, episode = null, settings = null } = {}) {
+    const settingsSnapshot =
+      settings && typeof settings === "object" ? settings : DebridSettingsStore.get();
+    const key = cacheKeyFor(stream, season, episode, settingsSnapshot);
     const cached = key ? cachedResult(key) : null;
     return cached ? withResolvedUrl(stream, cached) : null;
   },

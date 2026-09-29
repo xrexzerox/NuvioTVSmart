@@ -187,9 +187,10 @@ export function createHomeScreenMethods24() {
         if (sameAnchorRow && useBoundedTvHydration && !forceFullScan && !refreshIndex && !includeNeighborRows && !isFocusedRow) {
           return;
         }
-        const images = entry.images.filter((image) => image.isConnected && image.dataset.src);
-        entry.images = images;
-        if (!images.length) return;
+        const indexedImages = Array.isArray(entry.images) ? entry.images : [];
+        if (!indexedImages.length) {
+          return;
+        }
         // Android's LazyRow loads the visible cards plus a small prefetch
         // neighborhood, not every item in the focused row. Keep the same
         // bounded behavior on Smart-TV runtimes; older/browser fallback paths
@@ -200,8 +201,16 @@ export function createHomeScreenMethods24() {
           const isRowNearViewport =
             rowRect.bottom >= viewportRect.top - verticalMargin && rowRect.top <= viewportRect.bottom + verticalMargin;
           if (!isRowNearViewport) {
+            // Most indexed rows are outside the viewport. Avoid walking every
+            // image in those rows on each scroll frame; inspect their images
+            // only when the row enters the prefetch window.
             return;
           }
+        }
+        const images = indexedImages.filter((image) => image.isConnected && image.dataset.src);
+        entry.images = images;
+        if (!images.length) {
+          return;
         }
         images.forEach((image) => {
           if (!(image instanceof HTMLImageElement) || !image.isConnected) {
@@ -253,6 +262,15 @@ export function createHomeScreenMethods24() {
     },
     commitHomeLazyImageSources(queued = [], anchorNode = null, anchorRow = null) {
       const pending = this.homeLazyImageCommitQueue || (this.homeLazyImageCommitQueue = []);
+      const pendingByImage = this.homeLazyImageCommitByImage || (this.homeLazyImageCommitByImage = new Map());
+      // Draining a bounded number of images per frame leaves a consumed prefix.
+      // Compact it once when new work arrives instead of shifting the array for
+      // every image, which otherwise repeatedly moves the remaining queue.
+      const consumed = Math.max(0, Number(this.homeLazyImageCommitHead || 0));
+      if (consumed > 0) {
+        pending.splice(0, consumed);
+        this.homeLazyImageCommitHead = 0;
+      }
       const nextOrder = () => {
         this.homeLazyImageCommitOrder = Number(this.homeLazyImageCommitOrder || 0) + 1;
         return this.homeLazyImageCommitOrder;
@@ -267,9 +285,8 @@ export function createHomeScreenMethods24() {
         if (!(entry?.image instanceof HTMLImageElement) || !entry.image.isConnected || !entry.image.dataset.src) {
           return;
         }
-        const existingIndex = pending.findIndex((candidate) => candidate.image === entry.image);
-        if (existingIndex >= 0) {
-          const existing = pending[existingIndex];
+        const existing = pendingByImage.get(entry.image);
+        if (existing) {
           existing.src = entry.src;
           existing.row = entry.row;
           existing.isFocusedRow = entry.isFocusedRow;
@@ -278,7 +295,9 @@ export function createHomeScreenMethods24() {
           existing.order = nextOrder();
           return;
         }
-        pending.push({ ...entry, order: nextOrder() });
+        const nextEntry = { ...entry, order: nextOrder() };
+        pending.push(nextEntry);
+        pendingByImage.set(entry.image, nextEntry);
       });
       pending.sort((left, right) => left.priority - right.priority || left.order - right.order);
       if (!pending.length || this.homeLazyImageCommitRaf) {
@@ -288,8 +307,13 @@ export function createHomeScreenMethods24() {
       const drain = () => {
         this.homeLazyImageCommitRaf = 0;
         let assigned = 0;
-        while (pending.length && assigned < HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME) {
-          const { image, src } = pending.shift();
+        let head = Math.max(0, Number(this.homeLazyImageCommitHead || 0));
+        while (head < pending.length && assigned < HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME) {
+          const { image, src } = pending[head];
+          head += 1;
+          if (pendingByImage.get(image)?.image === image) {
+            pendingByImage.delete(image);
+          }
           if (!(image instanceof HTMLImageElement) || !image.isConnected) {
             continue;
           }
@@ -302,7 +326,12 @@ export function createHomeScreenMethods24() {
           image.src = currentSrc || src;
           assigned += 1;
         }
-        if (pending.length) {
+        if (head >= pending.length) {
+          pending.length = 0;
+          this.homeLazyImageCommitHead = 0;
+          pendingByImage.clear();
+        } else {
+          this.homeLazyImageCommitHead = head;
           this.homeLazyImageCommitRaf = requestAnimationFrame(drain);
         }
       };
@@ -315,30 +344,68 @@ export function createHomeScreenMethods24() {
       }
     },
     setupGridStickyHeader(showHeroSection) {
+      this.teardownGridStickyHeader();
       const main = this.container?.querySelector(".home-main");
       const sticky = this.container?.querySelector("#homeGridSticky");
-      const sections = Array.from(this.container?.querySelectorAll(".home-grid-section[data-section-title]") || []);
+      const sections = Array.from(this.container?.querySelectorAll(".home-grid-section[data-section-title]") || [])
+        .map((section) => ({
+          offsetTop: Number(section.offsetTop || 0),
+          title: String(section.dataset.sectionTitle || "")
+        }))
+        .sort((left, right) => left.offsetTop - right.offsetTop);
       if (!main || !sticky || !sections.length) {
         return;
       }
       const hero = showHeroSection ? this.container?.querySelector(".home-hero") : null;
       const heroHeight = hero ? hero.offsetHeight : 0;
+      let activeTitle = null;
+      let wasVisible = null;
+      let updateFrame = 0;
       const update = () => {
-        const threshold = main.scrollTop + 72;
-        let activeTitle = "";
-        sections.forEach((section) => {
-          if (section.offsetTop <= threshold) {
-            activeTitle = String(section.dataset.sectionTitle || "");
+        if (updateFrame) {
+          return;
+        }
+        updateFrame = requestAnimationFrame(() => {
+          updateFrame = 0;
+          const threshold = main.scrollTop + 72;
+          let nextTitle = "";
+          // Cache each section's offset when binding the listener. Reading
+          // offsetTop for every section on every native scroll event can force
+          // repeated layout work on TV WebViews.
+          let low = 0;
+          let high = sections.length - 1;
+          let activeIndex = -1;
+          while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (sections[middle].offsetTop <= threshold) {
+              activeIndex = middle;
+              low = middle + 1;
+            } else {
+              high = middle - 1;
+            }
+          }
+          if (activeIndex >= 0) {
+            nextTitle = sections[activeIndex].title;
+          }
+          const isVisible = Boolean(nextTitle && (!showHeroSection || main.scrollTop > Math.max(0, heroHeight - 48)));
+          if (nextTitle !== activeTitle) {
+            activeTitle = nextTitle;
+            sticky.textContent = nextTitle;
+          }
+          if (isVisible !== wasVisible) {
+            wasVisible = isVisible;
+            sticky.classList.toggle("is-visible", isVisible);
           }
         });
-        const shouldShow = activeTitle && (!showHeroSection || main.scrollTop > Math.max(0, heroHeight - 48));
-        sticky.textContent = activeTitle;
-        sticky.classList.toggle("is-visible", Boolean(shouldShow));
       };
       main.addEventListener("scroll", update, { passive: true });
       update();
       this.gridStickyCleanup = () => {
         main.removeEventListener("scroll", update);
+        if (updateFrame) {
+          cancelAnimationFrame(updateFrame);
+          updateFrame = 0;
+        }
       };
     },
     selectNextUpProgressCandidates(allProgress = [], inProgressItems = [], watchedItems = [], options = {}) {

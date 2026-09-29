@@ -68,13 +68,15 @@ export function createHomeScreenMethods18() {
         this.clearFocusedPosterFlowState();
         this.collapseFocusedPoster();
       }
-      logHomePerf("focusNode", {
-        ms: Number((homePerfNow() - focusStart).toFixed(2)),
-        direction: direction || "",
-        layoutMode: this.layoutMode,
-        main: Boolean(this.isMainNode(target)),
-        sidebar: Boolean(this.isSidebarNode(target))
-      });
+      if (HOME_PERF_DEBUG) {
+        logHomePerf("focusNode", {
+          ms: Number((homePerfNow() - focusStart).toFixed(2)),
+          direction: direction || "",
+          layoutMode: this.layoutMode,
+          main: Boolean(this.isMainNode(target)),
+          sidebar: Boolean(this.isSidebarNode(target))
+        });
+      }
       return true;
     },
     buildNavigationModel() {

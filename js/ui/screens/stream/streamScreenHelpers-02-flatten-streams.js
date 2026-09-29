@@ -92,6 +92,11 @@ export function flattenStreams(streamResult) {
     return [];
   }
   const flattened = [];
+  // Reuse one profile-scoped settings snapshot for torrent entries without a
+  // direct URL. Most addon streams already have playable URLs, so load settings
+  // lazily only when the first resolver-only entry needs a debrid check.
+  let debridSettings = null;
+  let hasDebridSettings = false;
   (streamResult.data || []).forEach((group) => {
     const groupName = group.addonName || "Addon";
     (group.streams || []).forEach((stream, index) => {
@@ -148,11 +153,18 @@ export function flattenStreams(streamResult) {
         sourceType: stream.sourceType || stream.mimeType || stream.type || stream.source || "",
         raw: stream
       };
-      if (
-        DirectDebridResolver.shouldListStream(entry) ||
-        WebOsEngineFsResolver.canResolveStream(entry) ||
-        TizenStreamingServerResolver.canResolveStream(entry)
-      ) {
+      const hasPlayableUrl = [entry.url, entry.externalUrl].some(
+        (value) => value && !String(value).trim().toLowerCase().startsWith("magnet:")
+      );
+      let shouldListStream = hasPlayableUrl || Boolean(entry.ytId);
+      if (!shouldListStream) {
+        if (!hasDebridSettings) {
+          debridSettings = DebridSettingsStore.get();
+          hasDebridSettings = true;
+        }
+        shouldListStream = DirectDebridResolver.shouldListStream(entry, { settings: debridSettings });
+      }
+      if (shouldListStream || WebOsEngineFsResolver.canResolveStream(entry) || TizenStreamingServerResolver.canResolveStream(entry)) {
         flattened.push(entry);
       }
     });
