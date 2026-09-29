@@ -8,6 +8,34 @@ const ADAPTERS = {
   tizen: tizenAdapter
 };
 
+// Some webOS builds report the marketing generation ("webOS 23") while others
+// report the release year ("webOS.TV-2023"). A two-digit capture reads the
+// year form as generation 20, so collapse the year onto the generation.
+function normalizeWebOsVersionToken(value) {
+  const text = String(value ?? "").trim();
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  if (text.length === 4 && numeric >= 2000) {
+    return numeric - 2000;
+  }
+  return numeric;
+}
+
+// Chromium -> webOS generation. Must stay aligned with
+// getWebOsReleaseYear() in js/platform/tvRuntimePerformance.js.
+function webOsGenerationForChromium(chromiumMajor) {
+  if (chromiumMajor <= 53) return 3;
+  if (chromiumMajor <= 68) return 4;
+  if (chromiumMajor <= 79) return 5;
+  if (chromiumMajor <= 87) return 6;
+  if (chromiumMajor <= 94) return 22;
+  if (chromiumMajor <= 108) return 23;
+  if (chromiumMajor <= 120) return 24;
+  return 25;
+}
+
 function parseWebOsMajorVersion() {
   const candidates = [
     String(globalThis.PalmSystem?.deviceInfo || ""),
@@ -15,36 +43,35 @@ function parseWebOsMajorVersion() {
     String(globalThis.navigator?.userAgent || "")
   ].filter(Boolean);
 
-  const patterns = [
-    /web0s\.tv[\s/-]?(\d{1,2})/i,
-    /webos\.tv[\s/-]?(\d{1,2})/i,
-    /web0s[\s/-]?(\d{1,2})/i,
-    /webos[\s/-]?(\d{1,2})/i,
-    /chromium\/(\d{2,3})/i,
-    /chrome\/(\d{2,3})/i
+  // Two passes on purpose. An explicit generation token ("webOS 23",
+  // "webOS.TV-2023") outranks the Chromium-version fallback, so it wins even
+  // when it only appears in a later candidate. The previous single pass also
+  // gated the fallback behind a test against the pattern's own source text,
+  // which never matched an escaped slash, so the generation mapping below was
+  // dead code and callers received the raw Chromium major (108 instead of 23).
+  // `(?!\d)` keeps a 4-digit year from being read as its leading two digits.
+  const generationPatterns = [
+    /web0s\.tv[\s._/-]?(\d{1,4})(?!\d)/i,
+    /webos\.tv[\s._/-]?(\d{1,4})(?!\d)/i,
+    /web0s[\s._/-]?(\d{1,4})(?!\d)/i,
+    /webos[\s._/-]?(\d{1,4})(?!\d)/i
   ];
-
   for (const candidate of candidates) {
-    for (const pattern of patterns) {
-      const match = candidate.match(pattern);
-      if (!match) {
-        continue;
+    for (const pattern of generationPatterns) {
+      const value = normalizeWebOsVersionToken(candidate.match(pattern)?.[1]);
+      if (value > 0) {
+        return value;
       }
-      const value = Number(match[1] || 0);
-      if (!Number.isFinite(value) || value <= 0) {
-        continue;
+    }
+  }
+
+  const chromiumPatterns = [/chromium\/(\d{2,3})/i, /chrome\/(\d{2,3})/i];
+  for (const candidate of candidates) {
+    for (const pattern of chromiumPatterns) {
+      const value = Number(candidate.match(pattern)?.[1] || 0);
+      if (Number.isFinite(value) && value > 0) {
+        return webOsGenerationForChromium(value);
       }
-      if (/chrom(e|ium)\//i.test(pattern.source)) {
-        if (value <= 53) return 3;
-        if (value <= 68) return 4;
-        if (value <= 79) return 5;
-        if (value <= 87) return 6;
-        if (value <= 94) return 22;
-        if (value <= 108) return 23;
-        if (value <= 120) return 24;
-        return 25;
-      }
-      return value;
     }
   }
   return 0;

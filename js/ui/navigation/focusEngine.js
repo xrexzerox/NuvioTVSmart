@@ -43,10 +43,22 @@ function hasActiveModal() {
 }
 
 const BACK_DEBOUNCE_MS = 250;
+// Minimum cursor travel before a pointer move is treated as real input.
+const POINTER_MOVE_MIN_DELTA_PX = 3;
+
+function readPointerPoint(event) {
+  const x = Number(event?.clientX ?? event?.pageX);
+  const y = Number(event?.clientY ?? event?.pageY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return { x, y };
+}
 
 export const FocusEngine = {
   lastBackHandledAt: 0,
   lastPointerFocusTarget: null,
+  lastPointerMovePoint: null,
   pointerMoveFrame: null,
   pendingPointerMoveEvent: null,
   activeKeyDownStartedAt: new Map(),
@@ -60,8 +72,15 @@ export const FocusEngine = {
     document.addEventListener("keydown", this.boundHandleKey, true);
     document.addEventListener("keyup", this.boundHandleKeyUp, true);
     if (Platform.isWebOS()) {
-      document.addEventListener("mousemove", this.boundHandlePointerMove, true);
-      document.addEventListener("pointermove", this.boundHandlePointerMove, true);
+      // webOS TV WebViews deliver the same physical pointer movement through
+      // both mousemove and pointermove. Registering both made every cursor
+      // update run the hit-test path twice per frame, which shows up as remote
+      // lag on budget panels. PointerEvent builds only need pointermove.
+      if (typeof globalThis.PointerEvent === "function") {
+        document.addEventListener("pointermove", this.boundHandlePointerMove, true);
+      } else {
+        document.addEventListener("mousemove", this.boundHandlePointerMove, true);
+      }
       document.addEventListener("click", this.boundHandlePointerClick, true);
       document.documentElement?.classList?.add("webos-pointer-remote");
       document.body?.classList?.add("webos-pointer-remote");
@@ -274,6 +293,20 @@ export const FocusEngine = {
   handlePointerMove(event) {
     if (!Platform.isWebOS()) {
       return;
+    }
+    // A resting Magic Remote still reports sub-pixel drift. Without this gate
+    // every idle frame re-ran the screen hover hook plus a forced
+    // getBoundingClientRect() layout for a pointer that had not moved.
+    const point = readPointerPoint(event);
+    if (point && this.lastPointerMovePoint) {
+      const deltaX = Math.abs(point.x - this.lastPointerMovePoint.x);
+      const deltaY = Math.abs(point.y - this.lastPointerMovePoint.y);
+      if (deltaX < POINTER_MOVE_MIN_DELTA_PX && deltaY < POINTER_MOVE_MIN_DELTA_PX) {
+        return;
+      }
+    }
+    if (point) {
+      this.lastPointerMovePoint = point;
     }
     this.pendingPointerMoveEvent = event;
     if (this.pointerMoveFrame) {

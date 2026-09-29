@@ -129,6 +129,29 @@
   transition: none !important;
 }
 
+/* Permanent will-change promotions were added for the animated sidebar,
+   settings and player chrome. The constrained fast path disables those
+   transitions, so the promotion no longer buys anything and only keeps an
+   extra GPU surface alive for the lifetime of the screen. That is exactly the
+   cost budget panels cannot pay: a 1366x768 HD Ready SoC now also selects this
+   path (see js/platform/tvRuntimePerformance.js), so release the layers here
+   instead of only on legacy-tizen. Short-lived route-enter layers keep their
+   promotion because they are already animation:none. */
+.performance-constrained .home-sidebar,
+.performance-constrained .home-nav-item,
+.performance-constrained .modern-sidebar-shell,
+.performance-constrained .settings-workspace,
+.performance-constrained .settings-nav-label,
+.performance-constrained .settings-slide-panel,
+.performance-constrained .profile-main-layer,
+.performance-constrained .profile-pin-layer,
+.performance-constrained .player-loading-identity,
+.performance-constrained .player-loading-logo-fill-clip,
+.performance-constrained .player-parental-line,
+.performance-constrained .player-skip-intro-progress-fill {
+  will-change: auto !important;
+}
+
 /* Detail screen fast path (series/movie title screen). Every focus move
    otherwise animates transform + box-shadow + colors across 10 selectors,
    scales comment cards (plus a line-clamp layout change), and blurs every
