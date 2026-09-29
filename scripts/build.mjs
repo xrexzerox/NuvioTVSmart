@@ -19,6 +19,26 @@ const requireConfiguredRuntimeEnv = /^(1|true|yes|on)$/i.test(
   String(process.env.NUVIO_REQUIRE_LOCAL_PROPERTIES || "")
 );
 const debugBundle = /^(1|true|yes|on)$/i.test(String(process.env.NUVIO_DEBUG_BUNDLE || ""));
+const platformArgument = process.argv.find((argument) => argument.startsWith("--platform="));
+const buildPlatform = String(platformArgument || "")
+  .split("=")[1]
+  ?.trim()
+  .toLowerCase();
+// JavaScript floors differ per platform: the Tizen WGT still has to run on
+// Chromium 56, while the webOS IPK only has to run on the webOS 5 baseline
+// (Chromium 68). Compiling the webOS package against the Tizen floor shipped
+// Chrome-56-only transpilation and a larger core-js prelude to webOS 23 sets
+// that already run Chromium 108. The bundled stylesheet stays on the shared
+// conservative floor because both packages consume the same dist output shape.
+const javascriptChromeTarget =
+  buildPlatform === "webos"
+    ? Number(compatibilityPolicy.webOsChromiumVersion) ||
+      Number(compatibilityPolicy.chromiumVersion)
+    : Number(compatibilityPolicy.chromiumVersion);
+if (buildPlatform && buildPlatform !== "webos" && buildPlatform !== "tizen") {
+  console.error(`Unsupported --platform value: ${buildPlatform}. Use "webos" or "tizen".`);
+  process.exit(1);
+}
 const legacyViewport = {
   width: 1920,
   height: 1080,
@@ -495,7 +515,7 @@ async function buildCoreJsBundle() {
   console.log("building core-js bundle...");
   const { list: requiredModules } = coreJsCompat({
     modules: ["core-js/stable"],
-    targets: { chrome: String(compatibilityPolicy.chromiumVersion) }
+    targets: { chrome: String(javascriptChromeTarget) }
   });
   if (requiredModules.length === 0) {
     throw new Error("Core-js compatibility query returned no required modules.");
@@ -512,7 +532,7 @@ async function buildCoreJsBundle() {
     bundle: true,
     format: "iife",
     minify: !debugBundle,
-    target: [`chrome${compatibilityPolicy.chromiumVersion}`],
+    target: [`chrome${javascriptChromeTarget}`],
     legalComments: "none"
   });
 }
@@ -522,7 +542,7 @@ async function buildAssSubtitleLibrary() {
     entryPoints: [path.join(rootDir, "node_modules", "assjs", "dist", "ass.global.min.js")],
     outfile: path.join(distDir, "assets", "libs", "ass.min.js"),
     minify: !debugBundle,
-    target: [`chrome${compatibilityPolicy.chromiumVersion}`],
+    target: [`chrome${javascriptChromeTarget}`],
     legalComments: "none"
   });
 }
@@ -541,7 +561,7 @@ async function buildPluginRuntimeAssets() {
     ],
     outfile: path.join(distDir, "assets", "libs", "quickjs-emscripten.global.js"),
     bundle: false,
-    target: [`chrome${compatibilityPolicy.chromiumVersion}`],
+    target: [`chrome${javascriptChromeTarget}`],
     minify: !debugBundle,
     legalComments: "none"
   });
@@ -551,7 +571,7 @@ async function buildPluginRuntimeAssets() {
     bundle: true,
     platform: "browser",
     format: "iife",
-    target: [`chrome${compatibilityPolicy.chromiumVersion}`],
+    target: [`chrome${javascriptChromeTarget}`],
     minify: !debugBundle,
     legalComments: "none",
     define: {
@@ -579,7 +599,7 @@ async function buildBundle() {
     minify: !debugBundle,
     format: "iife",
     sourcemap: debugBundle,
-    target: [`chrome${compatibilityPolicy.chromiumVersion}`],
+    target: [`chrome${javascriptChromeTarget}`],
     metafile: true,
     define: {
       "process.env.NODE_ENV": '"production"',

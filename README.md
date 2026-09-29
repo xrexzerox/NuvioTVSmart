@@ -25,6 +25,7 @@ Platform capabilities are intentionally version-dependent:
 - **Samsung Tizen 6+** — torrent/P2P and the packaged PluginService are supported. Plugin execution requires the packaged service plus the TV runtime's Worker and WebAssembly support. Tizen 6 and later use the same current Tizen service pipeline.
 - **LG webOS 5.x** — torrent/P2P and the packaged plugin service are supported, with the limited plugin resource quotas used by the older webOS runtime.
 - **LG webOS 6+** — torrent/P2P and the packaged plugin service are supported with the modern plugin resource quotas.
+- **webOS Hub and HD Ready (1366x768) sets** — the runtime generation alone does not describe this hardware, so the panel resolution also selects the constrained rendering profile: live backdrop blur, route and focus animations, and promoted compositor layers are turned off, and Home loads fewer images per pass. Current webOS generations on 1080p and 4K panels keep the full rendering path.
 
 On Tizen 5+ and LG webOS, torrent/P2P uses only the bundled local companion service; no external torrent streaming server is configured or required.
 

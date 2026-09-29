@@ -6,7 +6,13 @@ import { TizenCapabilities } from "./tizen/tizenCapabilities.js";
 // Keep this policy tied to the runtime generation, not the vendor name.
 export const TV_RUNTIME_PERFORMANCE_THRESHOLDS = Object.freeze({
   modernTvYear: 2022,
-  modernChromiumMajor: 85
+  modernChromiumMajor: 85,
+  // HD Ready (1366x768) panels ship on the budget tiers of every TV line,
+  // including LG webOS Hub sets that otherwise report a current runtime
+  // generation and a current Chromium build. Their SoC is far weaker than the
+  // year/major-version baseline implies, so the generation check alone is not
+  // enough to decide whether the expensive rendering path is affordable.
+  lowResolutionPanelMaxWidth: 1400
 });
 
 const WEBOS_RELEASE_YEARS = Object.freeze({
@@ -45,22 +51,49 @@ function readWebOsMajorVersion() {
     String(globalThis.webOSSystem?.deviceInfo || ""),
     String(globalThis.navigator?.userAgent || "")
   ].filter(Boolean);
+  // Kept in sync with parseWebOsMajorVersion() in js/platform/index.js.
   const patterns = [
-    /web0s\.tv[\s\-/]?(\d{1,2})/i,
-    /webos\.tv[\s\-/]?(\d{1,2})/i,
-    /web0s[\s\-/]?(\d{1,2})/i,
-    /webos[\s\-/]?(\d{1,2})/i
+    /web0s\.tv[\s._\-/]?(\d{1,4})(?!\d)/i,
+    /webos\.tv[\s._\-/]?(\d{1,4})(?!\d)/i,
+    /web0s[\s._\-/]?(\d{1,4})(?!\d)/i,
+    /webos[\s._\-/]?(\d{1,4})(?!\d)/i
   ];
   for (const candidate of candidates) {
     for (const pattern of patterns) {
       const match = candidate.match(pattern);
-      const version = Number(match?.[1] || 0);
+      const version = match?.[1] ? normalizeWebOsVersionToken(match[1]) : 0;
       if (Number.isFinite(version) && version > 0) {
         return version;
       }
     }
   }
   return 0;
+}
+
+// webOS device info reports the marketing generation either as a bare number
+// ("webOS 23") or as a release year ("webOS.TV-2023"). Both describe the same
+// generation, so collapse the year form onto the generation number. A plain
+// two-digit capture would read "webOS.TV-2023" as generation 20.
+function normalizeWebOsVersionToken(value) {
+  const text = String(value || "").trim();
+  const numeric = Number(text);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  if (text.length === 4 && numeric >= 2000) {
+    return numeric - 2000;
+  }
+  return numeric;
+}
+
+function readPanelPixelWidth() {
+  const candidates = [
+    Number(globalThis.screen?.width || 0),
+    Number(globalThis.innerWidth || 0),
+    Number(globalThis.document?.documentElement?.clientWidth || 0)
+  ];
+  const widths = candidates.filter((value) => Number.isFinite(value) && value > 0);
+  return widths.length ? Math.min(...widths) : 0;
 }
 
 function getWebOsReleaseYear(webOsMajorVersion, chromiumMajorVersion) {
@@ -72,17 +105,20 @@ function getWebOsReleaseYear(webOsMajorVersion, chromiumMajorVersion) {
     return WEBOS_RELEASE_YEARS[major];
   }
 
+  // Must stay aligned with the Chromium -> webOS generation table in
+  // js/platform/index.js. The plain "Web0S" user agent used by webOS Hub sets
+  // has no generation token at all, so this fallback is the only signal those
+  // devices provide.
   const chromium = Number(chromiumMajorVersion || 0);
   if (chromium > 0) {
-    if (chromium <= 38) return 2016;
-    if (chromium <= 53) return 2018;
-    if (chromium <= 68) return 2020;
-    if (chromium <= 79) return 2021;
-    if (chromium <= 87) return 2022;
-    if (chromium <= 94) return 2023;
-    if (chromium <= 108) return 2024;
-    if (chromium <= 120) return 2025;
-    return 2026;
+    if (chromium <= 53) return 2016;
+    if (chromium <= 68) return 2018;
+    if (chromium <= 79) return 2020;
+    if (chromium <= 87) return 2021;
+    if (chromium <= 94) return 2022;
+    if (chromium <= 108) return 2023;
+    if (chromium <= 120) return 2024;
+    return 2025;
   }
   return 0;
 }
@@ -119,6 +155,7 @@ export function getTvRuntimePerformanceProfile({ forceRefresh = false } = {}) {
   const isTizen = Platform.isTizen();
   const isTvRuntime = isWebOS || isTizen;
   let chromiumMajorVersion = readChromiumMajorVersion();
+  const panelPixelWidth = readPanelPixelWidth();
   if (!isTvRuntime) {
     cachedProfile = Object.freeze({
       isTvRuntime: false,
@@ -127,6 +164,8 @@ export function getTvRuntimePerformanceProfile({ forceRefresh = false } = {}) {
       chromiumMajorVersion,
       tvYearKnown: false,
       chromiumVersionKnown: chromiumMajorVersion > 0,
+      panelPixelWidth,
+      isLowResolutionPanel: false,
       isLegacyTvRuntime: false,
       isPerformanceConstrained: false
     });
@@ -143,12 +182,17 @@ export function getTvRuntimePerformanceProfile({ forceRefresh = false } = {}) {
     chromiumMajorVersion = Number(capabilities?.chromiumMajorVersion || chromiumMajorVersion);
   }
 
-  const { modernTvYear, modernChromiumMajor } = TV_RUNTIME_PERFORMANCE_THRESHOLDS;
+  const { modernTvYear, modernChromiumMajor, lowResolutionPanelMaxWidth } =
+    TV_RUNTIME_PERFORMANCE_THRESHOLDS;
   const tvYearKnown = tvYear > 0;
   const chromiumVersionKnown = chromiumMajorVersion > 0;
   const isLegacyByYear = tvYearKnown && tvYear < modernTvYear;
   const isLegacyByChromium = chromiumVersionKnown && chromiumMajorVersion < modernChromiumMajor;
   const isUnidentifiedRuntime = !tvYearKnown && !chromiumVersionKnown;
+  const isLowResolutionPanel = panelPixelWidth > 0 && panelPixelWidth <= lowResolutionPanelMaxWidth;
+  // A current runtime generation does not guarantee current hardware. Budget
+  // HD Ready sets pair webOS 23 (or Tizen 7) with a low-tier SoC, so the panel
+  // resolution is treated as a separate, upgrading-only signal.
   const isLegacyTvRuntime = isLegacyByYear || isLegacyByChromium || isUnidentifiedRuntime;
 
   cachedProfile = Object.freeze({
@@ -158,8 +202,10 @@ export function getTvRuntimePerformanceProfile({ forceRefresh = false } = {}) {
     chromiumMajorVersion,
     tvYearKnown,
     chromiumVersionKnown,
+    panelPixelWidth,
+    isLowResolutionPanel,
     isLegacyTvRuntime,
-    isPerformanceConstrained: isLegacyTvRuntime
+    isPerformanceConstrained: isLegacyTvRuntime || isLowResolutionPanel
   });
   return cachedProfile;
 }

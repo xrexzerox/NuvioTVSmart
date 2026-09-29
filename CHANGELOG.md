@@ -1,3 +1,13 @@
+## 1.2.2
+
+### Improvements & Fixes
+
+- Reduced webOS lag on HD Ready (1366x768) and webOS Hub sets by treating panel resolution as a separate performance signal: these devices now select the constrained rendering profile instead of the full one, which disables live backdrop blur, route and focus animations, promoted compositor layers, and extra Home image rows
+- Restored the Chromium-to-webOS version mapping, which was unreachable because the guard tested a regex pattern against its own escaped source text; webOS Hub devices report the correct generation (23 instead of 108) and webOS 3.x sets get their compatibility styles back
+- Fixed `webOS.TV-<year>` device info being read as generation 20, and aligned the Chromium-to-year fallback with the version table so Chromium 108 reports webOS 23 / 2023
+- Processed each webOS pointer movement once instead of once per event name, and dropped sub-pixel pointer drift from a resting remote before it forced a layout
+- Built the webOS package against the webOS JavaScript floor instead of the Tizen floor, removing ~110 KB of Chrome-56 transpilation and polyfills from every webOS install; the Tizen package is unchanged
+
 ## 1.2.1
 
 ### Improvements & Fixes
